@@ -3,7 +3,11 @@ import { Toaster as Sonner } from '@/components/ui/sonner'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
+
 import Login from './pages/Login'
+import Register from './pages/Register'
+import ForgotPassword from './pages/ForgotPassword'
+
 import DashboardLayout from './components/layout/DashboardLayout'
 import OwnerDashboard from './pages/owner/OwnerDashboard'
 import StaffDashboard from './pages/staff/StaffDashboard'
@@ -28,8 +32,14 @@ const App = () => (
       <Sonner />
       <BrowserRouter>
         <Routes>
-          {/* ======= 1.a) 로그인 페이지 (첫 페이지, 아이디/비밀번호 입력, 로그인버튼, 비밀번호찾기) ======= */}
+          {/* 로그인 */}
           <Route path="/" element={<Login />} />
+
+          {/* 회원가입 */}
+          <Route path="/register" element={<Register />} />
+
+          {/* 비밀번호 찾기 */}
+          <Route path="/forgot-password" element={<ForgotPassword />} />
 
           {/* Owner Routes */}
           <Route
@@ -115,7 +125,7 @@ const App = () => (
             }
           />
 
-          {/* Common Routes */}
+          {/* 공통 */}
           <Route
             path="/announcements"
             element={
