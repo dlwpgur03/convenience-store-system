@@ -5,8 +5,6 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
 
 import Login from './pages/Login'
-import Register from './pages/Register'
-import ForgotPassword from './pages/ForgotPassword'
 
 import DashboardLayout from './components/layout/DashboardLayout'
 import OwnerDashboard from './pages/owner/OwnerDashboard'
@@ -34,12 +32,6 @@ const App = () => (
         <Routes>
           {/* 로그인 */}
           <Route path="/" element={<Login />} />
-
-          {/* 회원가입 */}
-          <Route path="/register" element={<Register />} />
-
-          {/* 비밀번호 찾기 */}
-          <Route path="/forgot-password" element={<ForgotPassword />} />
 
           {/* Owner Routes */}
           <Route

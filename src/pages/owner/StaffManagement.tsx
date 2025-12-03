@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   Card,
   CardContent,
@@ -19,45 +19,35 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog'
-import { Calendar } from '@/components/ui/calendar'
 import {
   Users,
   UserPlus,
-  Calendar as CalendarIcon,
   Clock,
   CheckCircle,
   XCircle,
+  Trash2,
 } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
+import api from '@/lib/api'
 
-// 테스트용 데이터 - 백엔드 연동 시 API로 대체 예정
-const mockStaff = [
-  {
-    id: 1,
-    name: '김알바',
-    phone: '010-1234-5678',
-    joinDate: '2024-01-01',
-    weeklyHours: 40,
-    status: 'active',
-  },
-  {
-    id: 2,
-    name: '이알바',
-    phone: '010-2345-6789',
-    joinDate: '2024-01-15',
-    weeklyHours: 32,
-    status: 'active',
-  },
-  {
-    id: 3,
-    name: '박알바',
-    phone: '010-3456-7890',
-    joinDate: '2023-12-01',
-    weeklyHours: 24,
-    status: 'active',
-  },
-]
+// ===== 실제 API 데이터 타입 =====
+interface Staff {
+  _id: string
+  name: string
+  phone: string
+  username: string
+  rawPassword?: string
+  joinDate?: string
+  status?: string
+}
 
+interface AddStaffResponse {
+  message: string
+  username: string
+  password: string
+}
+
+// ===== mock: 대타 요청 =====
 const mockSubstituteRequests = [
   {
     id: 1,
@@ -77,6 +67,7 @@ const mockSubstituteRequests = [
   },
 ]
 
+// ===== mock: 시간표 =====
 const weekSchedule = [
   {
     day: '월요일',
@@ -94,48 +85,89 @@ const weekSchedule = [
       { time: '22:00-06:00', staff: '김알바' },
     ],
   },
-  // 더 많은 요일...
 ]
 
 const StaffManagement = () => {
   const { toast } = useToast()
+
+  const [staffList, setStaffList] = useState<Staff[]>([])
   const [newStaffName, setNewStaffName] = useState('')
   const [newStaffPhone, setNewStaffPhone] = useState('')
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false)
 
-  const handleAddStaff = () => {
-    // 백엔드 API 연동 - 자동으로 ID/비밀번호 생성 예정
-    const randomPassword = Math.floor(100000 + Math.random() * 900000)
-
-    toast({
-      title: '근무자 추가 완료',
-      description: `아이디: ${newStaffName}, 임시 비밀번호: ${randomPassword}`,
-      duration: 10000,
-    })
-
-    setNewStaffName('')
-    setNewStaffPhone('')
-    setIsAddDialogOpen(false)
+  // ===== 직원 목록 불러오기 =====
+  const fetchStaff = async () => {
+    try {
+      const res = await api.get<Staff[]>('/staff/list')
+      setStaffList(res.data)
+    } catch {
+      toast({
+        title: '오류',
+        description: '근무자 목록을 불러오지 못했습니다.',
+        variant: 'destructive',
+      })
+    }
   }
 
-  const handleSubstituteApproval = (requestId: number, approve: boolean) => {
-    // 백엔드 API 연동 예정
+  useEffect(() => {
+    fetchStaff()
+  }, [])
+
+  // ===== 직원 추가 =====
+  const handleAddStaff = async () => {
+    try {
+      const res = await api.post<AddStaffResponse>('/staff/add', {
+        name: newStaffName,
+        phone: newStaffPhone,
+      })
+
+      toast({
+        title: '근무자 추가 완료',
+        description: `ID: ${res.data.username}\nPW: ${res.data.password}`,
+        duration: 8000,
+      })
+
+      setNewStaffName('')
+      setNewStaffPhone('')
+      setIsAddDialogOpen(false)
+      fetchStaff()
+    } catch {
+      toast({
+        title: '추가 실패',
+        description: '근무자 추가 중 오류 발생',
+        variant: 'destructive',
+      })
+    }
+  }
+
+  // ===== 직원 삭제 =====
+  const handleDeleteStaff = async (id: string) => {
+    try {
+      await api.delete(`/staff/delete/${id}`)
+      toast({ title: '삭제 완료' })
+      fetchStaff()
+    } catch {
+      toast({
+        title: '삭제 실패',
+        variant: 'destructive',
+      })
+    }
+  }
+
+  // ===== 대타 요청 처리 (mock) =====
+  const handleSubstituteApproval = (id: number, approve: boolean) => {
     toast({
       title: approve ? '대타 요청 승인' : '대타 요청 거절',
-      description: `대타 요청이 ${approve ? '승인' : '거절'}되었습니다.`,
+      description: `요청이 ${approve ? '승인' : '거절'}되었습니다.`,
     })
   }
 
   return (
     <div className="space-y-6">
-      {/* ======= 2.c) 근무자 관리 - 명단/연락처, 시간표(생성/수정/배포), 대타요청 승인, 신규근무자추가 ======= */}
+      {/* ===== Header ===== */}
       <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold">근무자 관리</h1>
-          <p className="text-muted-foreground mt-1">
-            근무자 정보와 스케줄을 관리하세요
-          </p>
-        </div>
+        <h1 className="text-3xl font-bold">근무자 관리</h1>
+
         <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
           <DialogTrigger asChild>
             <Button>
@@ -143,35 +175,32 @@ const StaffManagement = () => {
               근무자 추가
             </Button>
           </DialogTrigger>
+
           <DialogContent>
             <DialogHeader>
               <DialogTitle>새 근무자 추가</DialogTitle>
-              {/* ======= 2.c-4) 신규 근무자 추가 (아이디=이름, 비밀번호=무작위숫자 자동생성 후 DB저장) ======= */}
               <DialogDescription>
-                근무자 정보를 입력하면 자동으로 아이디와 임시 비밀번호가
-                생성됩니다.
+                이름/연락처 입력 시 자동으로 ID와 임시 비밀번호가 생성됩니다.
               </DialogDescription>
             </DialogHeader>
+
             <div className="space-y-4 pt-4">
-              <div className="space-y-2">
-                <Label htmlFor="name">이름</Label>
+              <div>
+                <Label>이름</Label>
                 <Input
-                  id="name"
-                  placeholder="이름을 입력하세요"
                   value={newStaffName}
                   onChange={(e) => setNewStaffName(e.target.value)}
                 />
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="phone">연락처</Label>
+              <div>
+                <Label>연락처</Label>
                 <Input
-                  id="phone"
-                  placeholder="010-0000-0000"
                   value={newStaffPhone}
                   onChange={(e) => setNewStaffPhone(e.target.value)}
                 />
               </div>
-              <Button onClick={handleAddStaff} className="w-full">
+
+              <Button className="w-full" onClick={handleAddStaff}>
                 추가하기
               </Button>
             </div>
@@ -179,130 +208,85 @@ const StaffManagement = () => {
         </Dialog>
       </div>
 
-      <Tabs defaultValue="list" className="space-y-4">
+      {/* ===== Tabs ===== */}
+      <Tabs defaultValue="list">
         <TabsList>
-          <TabsTrigger value="list">근무자 명단</TabsTrigger>
+          <TabsTrigger value="list">근무자 목록</TabsTrigger>
           <TabsTrigger value="schedule">근무 시간표</TabsTrigger>
           <TabsTrigger value="substitute">대타 요청</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="list" className="space-y-4">
-          {/* ======= 2.c-1) 근무자 명단 및 연락처 ======= */}
-          <div className="grid gap-4 md:grid-cols-3">
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-sm font-medium flex items-center gap-2">
-                  <Users className="w-4 h-4" />
-                  전체 근무자
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">{mockStaff.length}명</div>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-sm font-medium flex items-center gap-2">
-                  <Clock className="w-4 h-4" />
-                  평균 근무시간
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">32시간/주</div>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-sm font-medium flex items-center gap-2">
-                  <CheckCircle className="w-4 h-4 text-success" />
-                  활성 근무자
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold text-success">
-                  {mockStaff.length}명
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-
+        {/* ===================== 직원 목록 ====================== */}
+        <TabsContent value="list">
           <Card>
             <CardHeader>
-              <CardTitle>근무자 명단</CardTitle>
-              <CardDescription>전체 근무자 정보</CardDescription>
+              <CardTitle>근무자 목록</CardTitle>
+              <CardDescription>등록된 전체 직원 목록입니다.</CardDescription>
             </CardHeader>
-            <CardContent>
-              <div className="space-y-3">
-                {mockStaff.map((staff) => (
-                  <div
-                    key={staff.id}
-                    className="flex items-center justify-between p-4 border rounded-lg hover:bg-muted/50 transition-colors"
-                  >
-                    <div className="flex items-center gap-4">
-                      <div className="w-12 h-12 bg-primary/10 rounded-full flex items-center justify-center">
-                        <Users className="w-6 h-6 text-primary" />
-                      </div>
-                      <div>
-                        <h4 className="font-medium">{staff.name}</h4>
-                        <p className="text-sm text-muted-foreground">
-                          {staff.phone}
-                        </p>
-                      </div>
+
+            <CardContent className="space-y-3">
+              {staffList.map((staff) => (
+                <div
+                  key={staff._id}
+                  className="border p-4 rounded-lg flex justify-between items-start hover:bg-muted/60 transition"
+                >
+                  <div className="space-y-1">
+                    <div className="font-semibold">{staff.name}</div>
+                    <div className="text-sm text-muted-foreground">
+                      {staff.phone}
                     </div>
-                    <div className="flex items-center gap-6">
-                      <div className="text-right">
-                        <p className="text-sm text-muted-foreground">
-                          주당 근무
-                        </p>
-                        <p className="font-medium">{staff.weeklyHours}시간</p>
-                      </div>
-                      <div className="text-right">
-                        <p className="text-sm text-muted-foreground">입사일</p>
-                        <p className="font-medium">{staff.joinDate}</p>
-                      </div>
-                      <Badge
-                        variant="outline"
-                        className="border-success text-success"
-                      >
-                        활성
-                      </Badge>
+                    <div className="text-xs">ID: {staff.username}</div>
+                    <div className="text-xs text-primary">
+                      PW: {staff.rawPassword ?? '-'}
+                    </div>
+                    <div className="text-xs">
+                      입사일:{' '}
+                      {staff.joinDate
+                        ? new Date(staff.joinDate).toLocaleDateString()
+                        : '-'}
                     </div>
                   </div>
-                ))}
-              </div>
+
+                  <div className="flex flex-col items-end gap-2">
+                    <Badge variant="outline">{staff.status ?? '활성'}</Badge>
+
+                    <Button
+                      size="icon"
+                      variant="destructive"
+                      onClick={() => handleDeleteStaff(staff._id)}
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </Button>
+                  </div>
+                </div>
+              ))}
             </CardContent>
           </Card>
         </TabsContent>
 
-        <TabsContent value="schedule" className="space-y-4">
+        {/* ===================== 시간표 (mock) ==================== */}
+        <TabsContent value="schedule">
           <Card>
             <CardHeader>
-              <CardTitle className="flex items-center justify-between">
-                {/* ======= 2.c-2,3) 월별 근무 시간표(생성/수정/배포), 대타 요청 확인 및 승인 ======= */}
-                <span>주간 근무 시간표</span>
-                <div className="flex gap-2">
-                  <Button variant="outline" size="sm">
-                    수정
-                  </Button>
-                  <Button size="sm">배포</Button>
-                </div>
-              </CardTitle>
-              <CardDescription>이번 주 근무 스케줄</CardDescription>
+              <CardTitle>주간 근무 시간표</CardTitle>
+              <CardDescription>아직은 mock 데이터입니다.</CardDescription>
             </CardHeader>
+
             <CardContent>
               <div className="space-y-4">
-                {weekSchedule.map((day, index) => (
-                  <div key={index} className="border rounded-lg p-4">
-                    <h4 className="font-medium mb-3">{day.day}</h4>
-                    <div className="grid gap-2 md:grid-cols-3">
-                      {day.shifts.map((shift, idx) => (
+                {weekSchedule.map((day, idx) => (
+                  <div key={idx} className="border p-4 rounded-lg">
+                    <h4 className="font-semibold mb-2">{day.day}</h4>
+
+                    <div className="grid md:grid-cols-3 gap-2">
+                      {day.shifts.map((shift, sIdx) => (
                         <div
-                          key={idx}
-                          className="flex items-center gap-2 p-3 bg-secondary rounded-lg"
+                          key={sIdx}
+                          className="flex items-center gap-3 bg-secondary p-3 rounded-lg"
                         >
                           <Clock className="w-4 h-4 text-muted-foreground" />
-                          <div className="flex-1">
-                            <p className="text-sm font-medium">{shift.time}</p>
+                          <div>
+                            <p className="font-medium">{shift.time}</p>
                             <p className="text-xs text-muted-foreground">
                               {shift.staff}
                             </p>
@@ -317,55 +301,50 @@ const StaffManagement = () => {
           </Card>
         </TabsContent>
 
-        <TabsContent value="substitute" className="space-y-4">
+        {/* ===================== 대타 요청 ====================== */}
+        <TabsContent value="substitute">
           <Card>
             <CardHeader>
               <CardTitle>대타 요청 목록</CardTitle>
-              {/* ======= 2.c-3) 대타 요청 확인 및 승인 ======= */}
-              <CardDescription>승인이 필요한 대타 요청</CardDescription>
+              <CardDescription>
+                승인 / 거절 기능은 백엔드 연동 예정.
+              </CardDescription>
             </CardHeader>
+
             <CardContent>
               <div className="space-y-3">
-                {mockSubstituteRequests.map((request) => (
+                {mockSubstituteRequests.map((req) => (
                   <div
-                    key={request.id}
-                    className="flex items-center justify-between p-4 border rounded-lg"
+                    key={req.id}
+                    className="border p-4 rounded-lg flex justify-between"
                   >
                     <div>
-                      <h4 className="font-medium">{request.requester}</h4>
-                      <p className="text-sm text-muted-foreground">
-                        {request.date} • {request.shift}
-                      </p>
-                      <p className="text-xs text-muted-foreground mt-1">
-                        사유: {request.reason}
-                      </p>
+                      <div className="font-semibold">{req.requester}</div>
+                      <div className="text-sm text-muted-foreground">
+                        {req.date} • {req.shift}
+                      </div>
+                      <div className="text-xs mt-1 text-muted-foreground">
+                        사유: {req.reason}
+                      </div>
                     </div>
-                    <div className="flex items-center gap-2">
-                      {request.status === '대기' ? (
-                        <>
-                          <Button
-                            size="sm"
-                            onClick={() =>
-                              handleSubstituteApproval(request.id, true)
-                            }
-                          >
-                            <CheckCircle className="w-4 h-4 mr-1" />
-                            승인
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() =>
-                              handleSubstituteApproval(request.id, false)
-                            }
-                          >
-                            <XCircle className="w-4 h-4 mr-1" />
-                            거절
-                          </Button>
-                        </>
-                      ) : (
-                        <Badge variant="outline">처리됨</Badge>
-                      )}
+
+                    <div className="flex gap-2">
+                      <Button
+                        size="sm"
+                        onClick={() => handleSubstituteApproval(req.id, true)}
+                      >
+                        <CheckCircle className="w-4 h-4 mr-1" />
+                        승인
+                      </Button>
+
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => handleSubstituteApproval(req.id, false)}
+                      >
+                        <XCircle className="w-4 h-4 mr-1" />
+                        거절
+                      </Button>
                     </div>
                   </div>
                 ))}

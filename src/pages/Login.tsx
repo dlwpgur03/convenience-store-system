@@ -14,11 +14,16 @@ import { Store, Lock, User } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
 import api from '@/lib/api'
 
-// 백엔드 응답 타입 명확히 선언
 interface LoginResponse {
   token: string
-  role: string
-  username: string
+  user: {
+    _id: string
+    username: string
+    role: string
+    name?: string
+    phone?: string
+    joinDate?: string
+  }
 }
 
 const Login = () => {
@@ -39,19 +44,21 @@ const Login = () => {
         password,
       })
 
-      const { token, role, username: userNameFromDB } = res.data
+      const token = res.data.token
+      const role = res.data.user.role
+      const name = res.data.user.username
 
-      // 저장
+      // 🔥 저장 키 정확히 통일하기
       localStorage.setItem('token', token)
-      localStorage.setItem('userRole', role)
-      localStorage.setItem('username', userNameFromDB)
+      localStorage.setItem('username', name)
+      localStorage.setItem('role', role)
 
       toast({
         title: '로그인 성공',
-        description: `${userNameFromDB}님 환영합니다.`,
+        description: `${name}님 환영합니다.`,
       })
 
-      // 이동
+      // 🔥 role 기반 라우팅
       if (role === 'owner') {
         navigate('/owner/dashboard')
       } else {
@@ -92,34 +99,28 @@ const Login = () => {
             <form onSubmit={handleLogin} className="space-y-6">
               <div className="space-y-2">
                 <Label htmlFor="username">아이디</Label>
-                <div className="relative">
-                  <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                  <Input
-                    id="username"
-                    type="text"
-                    placeholder="아이디를 입력하세요"
-                    value={username}
-                    onChange={(e) => setUsername(e.target.value)}
-                    className="pl-10"
-                    required
-                  />
-                </div>
+                <Input
+                  id="username"
+                  type="text"
+                  placeholder="아이디를 입력하세요"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  className="pl-10"
+                  required
+                />
               </div>
 
               <div className="space-y-2">
                 <Label htmlFor="password">비밀번호</Label>
-                <div className="relative">
-                  <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                  <Input
-                    id="password"
-                    type="password"
-                    placeholder="비밀번호를 입력하세요"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    className="pl-10"
-                    required
-                  />
-                </div>
+                <Input
+                  id="password"
+                  type="password"
+                  placeholder="비밀번호를 입력하세요"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="pl-10"
+                  required
+                />
               </div>
 
               <Button
@@ -130,29 +131,6 @@ const Login = () => {
                 {isLoading ? '로그인 중...' : '로그인'}
               </Button>
             </form>
-
-            {/* 회원가입 & 비밀번호 찾기 */}
-            <div className="mt-6 flex items-center justify-between text-sm text-primary">
-              <button
-                type="button"
-                className="hover:underline"
-                onClick={() => navigate('/register')}
-              >
-                회원가입
-              </button>
-
-              <button
-                type="button"
-                className="hover:underline"
-                onClick={() => navigate('/forgot-password')}
-              >
-                비밀번호 찾기
-              </button>
-            </div>
-
-            <div className="mt-6 pt-6 border-t text-center text-sm text-muted-foreground">
-              테스트: 사장님(owner) / 기타(staff)
-            </div>
           </CardContent>
         </Card>
       </div>
