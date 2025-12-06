@@ -12,7 +12,8 @@ import productRoutes from './routes/productRoutes'
 import kioskRoutes from './routes/kioskRoutes'
 import analyticsRoutes from './routes/analyticsRoutes'
 import dashboardRoutes from './routes/dashboardRoutes'
-
+import scheduleRoutes from './routes/scheduleRoutes'
+import subRoutes from './routes/subRoutes'
 dotenv.config()
 
 const app = express()
@@ -28,11 +29,13 @@ app.use('/api/auth', authRoutes)
 app.use('/api/staff', staffRoutes)
 app.use('/api/announcements', announcementRoutes)
 app.use('/api/community', communityRoutes)
-app.use('/api', qrRoutes)
 app.use('/api/products', productRoutes)
 app.use('/api/kiosk', kioskRoutes)
 app.use('/api/analytics', analyticsRoutes)
 app.use('/api/dashboard', dashboardRoutes)
+app.use('/api/schedule', scheduleRoutes)
+app.use('/api/sub', subRoutes)
+app.use('/api', qrRoutes)
 
 const PORT = process.env.PORT || 5000
 
