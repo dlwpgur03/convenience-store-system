@@ -45,6 +45,7 @@ const staffMenuItems = [
 const commonMenuItems = [
   { title: '공지사항', url: '/announcements', icon: FileText },
   { title: '익명 커뮤니티', url: '/community', icon: MessageSquare },
+  { title: '팀원 소개', url: '/team', icon: Users },
 ]
 
 export function AppSidebar() {
