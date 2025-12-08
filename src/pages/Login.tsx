@@ -12,11 +12,7 @@ import {
 } from '@/components/ui/card'
 import { Store, ScanBarcode } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
-import axios from 'axios'
-
-const api = axios.create({
-  baseURL: 'http://localhost:5000/api', // 백엔드 서버 주소
-})
+import api from '@/lib/api'
 
 interface LoginResponse {
   token: string

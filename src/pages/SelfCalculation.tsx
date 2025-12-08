@@ -22,7 +22,7 @@ import {
   ScanBarcode,
 } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
-import axios from 'axios'
+import api from '@/lib/api'
 
 // 장바구니 아이템 타입
 interface CartItem {
@@ -32,11 +32,6 @@ interface CartItem {
   quantity: number
   barcode?: string
 }
-
-// API 설정
-const api = axios.create({
-  baseURL: 'http://localhost:5000/api',
-})
 
 const SelfCheckout = () => {
   const { toast } = useToast()
