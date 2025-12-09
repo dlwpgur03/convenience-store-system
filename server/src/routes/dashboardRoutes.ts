@@ -19,6 +19,11 @@ router.get('/summary', authMiddleware, async (req, res) => {
   try {
     const todayStart = new Date()
     todayStart.setHours(0, 0, 0, 0)
+    // 유통기한이 지난 상품은 재고를 0으로 정리 (DB 반영)
+    await Product.updateMany(
+      { expiryDate: { $lt: todayStart }, stock: { $gt: 0 } },
+      { $set: { stock: 0 } }
+    )
 
     // 1. 오늘 매출 & 시간대별 차트 데이터 (분석 페이지와 동일한 로직)
     const hourlyStats = await Order.aggregate([
@@ -47,17 +52,8 @@ router.get('/summary', authMiddleware, async (req, res) => {
     const products = await Product.find({})
     const defaultMinStock = 5 // 프런트 인벤토리 페이지 기본 minStock과 맞춤
 
-    const normalizeQty = (p: any) => {
-      const qty = typeof p.stock === 'number' ? p.stock : 0
-      // 유통기한 지난 상품은 인벤토리 페이지에서 quantity 0으로 취급
-      if (p.expiryDate) {
-        const expDate = new Date(p.expiryDate)
-        const todayStart = new Date()
-        todayStart.setHours(0, 0, 0, 0)
-        if (!isNaN(expDate.getTime()) && expDate < todayStart) return 0
-      }
-      return qty
-    }
+    const normalizeQty = (p: any) =>
+      typeof p.stock === 'number' ? p.stock : 0
 
     const totalInventoryCount = products.reduce(
       (acc, cur) => acc + normalizeQty(cur),
@@ -167,7 +163,7 @@ router.get('/summary', authMiddleware, async (req, res) => {
       stats: {
         todaySales: todaySalesTotal,
         totalInventory: totalInventoryCount,
-        pendingOrders: low, // 재고 부족 품목 수 = 발주 대기
+        pendingOrders: lowStockItems.length, // 부족 품목 수(임박 포함)를 그대로 카운트
         staffCount: staffCount,
       },
       salesData,

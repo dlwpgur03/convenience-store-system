@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import axios from 'axios'
 import { useLocation } from 'react-router-dom'
 import {
@@ -97,6 +97,8 @@ const mergeOrderRequests = (
 
   existing.forEach((req) => {
     const low = lowMap.get(req.id)
+    // 승인된 항목이 더 이상 재고 부족 목록에 없으면 목록에서 제거
+    if (req.status === '승인' && !low) return
     const keep = req.status !== '대기' || !!low
     if (!keep) return
     if (low) lowMap.delete(req.id)
@@ -168,11 +170,15 @@ const InventoryManagement = () => {
   )
   const [items, setItems] = useState<Product[]>([])
   const [loading, setLoading] = useState(false)
+  const [isDemoMode, setIsDemoMode] = useState(false)
   const [orderRequests, setOrderRequests] = useState<OrderRequest[]>(
     () => loadSavedOrders()
   )
   const [approveTarget, setApproveTarget] = useState<OrderRequest | null>(null)
   const [orderQuantity, setOrderQuantity] = useState('')
+  const pendingSyncTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>(
+    {}
+  )
   const [activeTab, setActiveTab] = useState<InventoryTab>(() => {
     const stateTab = (location.state as any)?.tab
     const searchTab = new URLSearchParams(location.search).get('tab')
@@ -213,6 +219,7 @@ const InventoryManagement = () => {
 
     const token = localStorage.getItem('token')
     if (!token) {
+      setIsDemoMode(true)
       console.warn('No auth token found. Using mock data.')
       setItems(MOCK_PRODUCTS)
       toast({
@@ -232,6 +239,7 @@ const InventoryManagement = () => {
         setItems([])
         return
       }
+      setIsDemoMode(false)
 
       const mapped = res.data.map((item: any) => {
         const expired = isExpired(item.expiryDate)
@@ -239,12 +247,9 @@ const InventoryManagement = () => {
           _id: item._id,
           // [안전장치 2] 필드값이 없을 경우 기본값 할당 (Null Check)
           productName: item.name || '이름 없음',
+          // 유통기한이 지나도 실제 재고 수량은 유지하고, 화면에서만 D-Day로 표시
           quantity:
-            typeof item.stock === 'number'
-              ? expired
-                ? 0
-                : item.stock
-              : 0, // 유통기한 지난 상품은 0으로 표시
+            typeof item.stock === 'number' ? Math.max(0, item.stock) : 0,
           category: item.category || '기타',
           price: typeof item.price === 'number' ? item.price : 0,
           minStock: typeof item.minStock === 'number' ? item.minStock : 5,
@@ -275,6 +280,7 @@ const InventoryManagement = () => {
       })
 
       // 에러 발생 시 UI 확인을 위해 모의 데이터로 설정
+      setIsDemoMode(true)
       setItems(MOCK_PRODUCTS)
     } finally {
       setLoading(false)
@@ -396,6 +402,12 @@ const InventoryManagement = () => {
     localStorage.setItem(ORDER_STORAGE_KEY, JSON.stringify(orderRequests))
   }, [orderRequests])
 
+  useEffect(() => {
+    return () => {
+      Object.values(pendingSyncTimers.current).forEach((t) => clearTimeout(t))
+    }
+  }, [])
+
   const pendingOrders = orderRequests.filter((r) => r.status === '대기')
   const approvedOrders = orderRequests.filter((r) => r.status === '승인')
 
@@ -425,6 +437,24 @@ const InventoryManagement = () => {
 
   const handleApproveConfirm = async () => {
     if (!approveTarget) return
+    const target = approveTarget
+    if (isDemoMode) {
+      toast({
+        title: '로그인 필요',
+        description: '실제 재고 반영을 위해 로그인 후 다시 시도하세요.',
+        variant: 'destructive',
+      })
+      return
+    }
+    const token = localStorage.getItem('token')
+    if (!token) {
+      toast({
+        title: '로그인 필요',
+        description: '로그인 후 승인하면 DB에 재고가 반영됩니다.',
+        variant: 'destructive',
+      })
+      return
+    }
     const qty = Number(orderQuantity)
     if (Number.isNaN(qty) || qty <= 0) {
       toast({
@@ -438,7 +468,7 @@ const InventoryManagement = () => {
     const applyApprovalState = () => {
       setOrderRequests((prev) =>
         prev.map((req) =>
-          req.id === approveTarget.id
+          req.id === target.id
             ? {
                 ...req,
                 status: '승인',
@@ -452,42 +482,75 @@ const InventoryManagement = () => {
       setOrderQuantity('')
       toast({
         title: '발주 승인 완료',
-        description: `${approveTarget.item}을(를) ${qty}개 발주했습니다.`,
+        description: `${target.item}을(를) ${qty}개 발주했습니다.`,
       })
-    }
-
-    const token = localStorage.getItem('token')
-    if (!token) {
-      setItems((prev) =>
-        prev.map((item) =>
-          item._id === approveTarget.id
-            ? { ...item, quantity: item.quantity + qty }
-            : item
-        )
-      )
-      applyApprovalState()
-      return
     }
 
     try {
-      await api.patch(`/products/${approveTarget.id}/stock`, {
-        quantity: qty,
+      applyApprovalState()
+      toast({
+        title: '전송 대기',
+        description: '10초 후 재고에 반영됩니다.',
       })
 
-      setItems((prev) =>
-        prev.map((item) =>
-          item._id === approveTarget.id
-            ? { ...item, quantity: item.quantity + qty }
-            : item
-        )
-      )
-      applyApprovalState()
-      await fetchInventory()
+      // 10초 후 DB 반영하고 승인 목록에서 제거
+      if (pendingSyncTimers.current[approveTarget.id]) {
+        clearTimeout(pendingSyncTimers.current[approveTarget.id])
+      }
+
+      pendingSyncTimers.current[target.id] = setTimeout(async () => {
+        try {
+          const approvalTime = target.orderedAt
+            ? new Date(target.orderedAt).getTime()
+            : Date.now()
+          const baseTime = Number.isFinite(approvalTime) ? approvalTime : Date.now()
+          const newExpiry = new Date(baseTime + 3 * 24 * 60 * 60 * 1000)
+          await api.patch(`/products/${target.id}/stock`, {
+            quantity: qty,
+            expiryDate: newExpiry.toISOString(),
+          })
+          setItems((prev) =>
+            prev.map((item) =>
+              item._id === target.id
+                ? { ...item, quantity: item.quantity + qty }
+                : item
+            )
+          )
+          // 승인 목록에서 제거
+          setOrderRequests((prev) =>
+            prev.filter((req) => req.id !== target.id)
+          )
+          toast({
+            title: '재고 반영 완료',
+            description: `${target.item} 재고가 업데이트되었습니다.`,
+          })
+          await fetchInventory()
+        } catch (err: any) {
+          console.error('발주 승인 처리 실패:', err)
+          const msg =
+            err?.response?.data?.message ||
+            (err?.message?.includes('Network')
+              ? '서버 연결에 문제가 있습니다.'
+              : '')
+          toast({
+            title: '승인 실패',
+            description:
+              msg || '재고 업데이트에 실패했습니다. 다시 시도해주세요.',
+            variant: 'destructive',
+          })
+        } finally {
+          delete pendingSyncTimers.current[target.id]
+        }
+      }, 10000)
     } catch (err: any) {
       console.error('발주 승인 처리 실패:', err)
+      const msg =
+        err?.response?.data?.message ||
+        (err?.message?.includes('Network') ? '서버 연결에 문제가 있습니다.' : '')
       toast({
         title: '승인 실패',
-        description: '재고 업데이트에 실패했습니다. 다시 시도해주세요.',
+        description:
+          msg || '재고 업데이트에 실패했습니다. 다시 시도해주세요.',
         variant: 'destructive',
       })
     }
@@ -502,6 +565,14 @@ const InventoryManagement = () => {
           재고 현황을 확인하고 발주를 관리하세요
         </p>
       </div>
+
+      {isDemoMode && (
+        <Card className="border-warning/40 bg-warning/10">
+          <CardContent className="py-3 text-sm text-warning">
+            현재 데모 모드입니다. 로그인 후 승인해야 DB 재고가 업데이트됩니다.
+          </CardContent>
+        </Card>
+      )}
 
       <Tabs
         value={activeTab}

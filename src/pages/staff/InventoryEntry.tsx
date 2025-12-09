@@ -97,11 +97,11 @@ const InventoryManagement = () => {
 
       // 데이터 매핑 및 기본값 처리
       const mapped = res.data.map((item: any) => {
-        const expired = isExpired(item.expiryDate)
         return {
           _id: item._id,
           productName: item.name || item.productName || '',
-          quantity: expired ? 0 : Number(item.stock) || 0, // 유통기한 지난 상품은 0으로 표시
+          // 유통기한이 지나도 실제 재고 수량을 그대로 표시하고, UI에서만 D-Day로 안내
+          quantity: Math.max(0, Number(item.stock) || 0),
           category: item.category || '기타',
           price: Number(item.price) || 0,
           minStock: Number(item.minStock) || 5,
