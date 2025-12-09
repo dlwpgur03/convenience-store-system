@@ -171,19 +171,21 @@ const InventoryManagement = () => {
   const [items, setItems] = useState<Product[]>([])
   const [loading, setLoading] = useState(false)
   const [isDemoMode, setIsDemoMode] = useState(false)
-  const [orderRequests, setOrderRequests] = useState<OrderRequest[]>(
-    () => loadSavedOrders()
+  const [orderRequests, setOrderRequests] = useState<OrderRequest[]>(() =>
+    loadSavedOrders()
   )
   const [approveTarget, setApproveTarget] = useState<OrderRequest | null>(null)
   const [orderQuantity, setOrderQuantity] = useState('')
-  const pendingSyncTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>(
-    {}
-  )
+  const pendingSyncTimers = useRef<
+    Record<string, ReturnType<typeof setTimeout>>
+  >({})
   const [activeTab, setActiveTab] = useState<InventoryTab>(() => {
     const stateTab = (location.state as any)?.tab
     const searchTab = new URLSearchParams(location.search).get('tab')
     const candidate = stateTab || searchTab
-    return candidate === 'orders' || candidate === 'expiring' || candidate === 'inventory'
+    return candidate === 'orders' ||
+      candidate === 'expiring' ||
+      candidate === 'inventory'
       ? candidate
       : 'inventory'
   })
@@ -503,7 +505,9 @@ const InventoryManagement = () => {
           const approvalTime = target.orderedAt
             ? new Date(target.orderedAt).getTime()
             : Date.now()
-          const baseTime = Number.isFinite(approvalTime) ? approvalTime : Date.now()
+          const baseTime = Number.isFinite(approvalTime)
+            ? approvalTime
+            : Date.now()
           const newExpiry = new Date(baseTime + 3 * 24 * 60 * 60 * 1000)
           await api.patch(`/products/${target.id}/stock`, {
             quantity: qty,
@@ -517,9 +521,7 @@ const InventoryManagement = () => {
             )
           )
           // 승인 목록에서 제거
-          setOrderRequests((prev) =>
-            prev.filter((req) => req.id !== target.id)
-          )
+          setOrderRequests((prev) => prev.filter((req) => req.id !== target.id))
           toast({
             title: '재고 반영 완료',
             description: `${target.item} 재고가 업데이트되었습니다.`,
@@ -546,11 +548,12 @@ const InventoryManagement = () => {
       console.error('발주 승인 처리 실패:', err)
       const msg =
         err?.response?.data?.message ||
-        (err?.message?.includes('Network') ? '서버 연결에 문제가 있습니다.' : '')
+        (err?.message?.includes('Network')
+          ? '서버 연결에 문제가 있습니다.'
+          : '')
       toast({
         title: '승인 실패',
-        description:
-          msg || '재고 업데이트에 실패했습니다. 다시 시도해주세요.',
+        description: msg || '재고 업데이트에 실패했습니다. 다시 시도해주세요.',
         variant: 'destructive',
       })
     }
@@ -720,7 +723,9 @@ const InventoryManagement = () => {
                           </p>
                           <p
                             className={`font-medium ${
-                              expiry !== null && expiry <= 3 && item.quantity > 0
+                              expiry !== null &&
+                              expiry <= 3 &&
+                              item.quantity > 0
                                 ? 'text-destructive'
                                 : ''
                             }`}
@@ -728,8 +733,8 @@ const InventoryManagement = () => {
                             {item.quantity <= 0
                               ? '-'
                               : expiry === null
-                                ? '-'
-                                : `D-${expiry}`}
+                              ? '-'
+                              : `D-${expiry}`}
                           </p>
                         </div>
                         {item.quantity < (item.minStock ?? 0) && (
@@ -740,14 +745,16 @@ const InventoryManagement = () => {
                             부족
                           </Badge>
                         )}
-                        {item.quantity > 0 && expiry !== null && expiry <= 3 && (
-                          <Badge
-                            variant="outline"
-                            className="border-destructive text-destructive"
-                          >
-                            임박
-                          </Badge>
-                        )}
+                        {item.quantity > 0 &&
+                          expiry !== null &&
+                          expiry <= 3 && (
+                            <Badge
+                              variant="outline"
+                              className="border-destructive text-destructive"
+                            >
+                              임박
+                            </Badge>
+                          )}
                       </div>
                     </div>
                   )
