@@ -57,7 +57,7 @@ router.patch('/:id/stock', authMiddleware, async (req, res) => {
       if (isNaN(parsed.getTime())) {
         return res.status(400).json({ message: '유통기한 형식이 올바르지 않습니다.' })
       }
-      update.expiryDate = parsed
+      update.$set = { expiryDate: parsed }
     }
 
     // $inc를 사용해 현재 재고가 없거나 NaN이어도 안전하게 증가시키고, 동시에 최신 값을 반환
