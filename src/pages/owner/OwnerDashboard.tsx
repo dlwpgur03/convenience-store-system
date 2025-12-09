@@ -142,7 +142,7 @@ const OwnerDashboard = () => {
 
         <Card 
           className="border-l-4 border-l-warning cursor-pointer hover:bg-accent/50 transition-colors"
-          onClick={() => navigate('/owner/inventory')}
+          onClick={() => navigate('/owner/inventory?tab=orders')}
         >
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">
@@ -295,7 +295,7 @@ const OwnerDashboard = () => {
               {data.stats.pendingOrders > 0 && (
                 <div 
                     className="flex items-start gap-3 p-3 bg-warning/10 border border-warning/20 rounded-lg cursor-pointer hover:bg-warning/20 transition-colors"
-                    onClick={() => navigate('/owner/inventory')}
+                    onClick={() => navigate('/owner/inventory?tab=orders')}
                 >
                   <AlertCircle className="w-5 h-5 text-warning mt-0.5" />
                   <div>

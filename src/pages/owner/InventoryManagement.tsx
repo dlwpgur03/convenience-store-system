@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
+import axios from 'axios'
+import { useLocation } from 'react-router-dom'
 import {
   Card,
   CardContent,
@@ -59,6 +61,8 @@ type OrderRequest = {
   /*******  34d91ae8-c998-4c15-b3f0-01d65f2cf339  *******/ orderQuantity?: number
   orderedAt?: string
 }
+
+type InventoryTab = 'inventory' | 'orders' | 'expiring'
 
 const isExpired = (date?: string) => {
   if (!date) return false
@@ -156,6 +160,7 @@ const MOCK_PRODUCTS: Product[] = [
 
 const InventoryManagement = () => {
   const { toast } = useToast()
+  const location = useLocation()
   const [searchTerm, setSearchTerm] = useState('')
   const [selectedCategory, setSelectedCategory] = useState('전체')
   const [sortMode, setSortMode] = useState<'default' | 'lowStock' | 'expiry'>(
@@ -168,6 +173,29 @@ const InventoryManagement = () => {
   )
   const [approveTarget, setApproveTarget] = useState<OrderRequest | null>(null)
   const [orderQuantity, setOrderQuantity] = useState('')
+  const [activeTab, setActiveTab] = useState<InventoryTab>(() => {
+    const stateTab = (location.state as any)?.tab
+    const searchTab = new URLSearchParams(location.search).get('tab')
+    const candidate = stateTab || searchTab
+    return candidate === 'orders' || candidate === 'expiring' || candidate === 'inventory'
+      ? candidate
+      : 'inventory'
+  })
+
+  useEffect(() => {
+    const stateTab = (location.state as any)?.tab
+    const searchTab = new URLSearchParams(location.search).get('tab')
+    const candidate = stateTab || searchTab
+    if (
+      candidate === 'orders' ||
+      candidate === 'expiring' ||
+      candidate === 'inventory'
+    ) {
+      setActiveTab((prev) => (prev === candidate ? prev : candidate))
+    } else {
+      setActiveTab('inventory')
+    }
+  }, [location])
 
   // [안전장치 3] 날짜 계산 로직 강화 (함수 선언으로 호이스팅)
   function daysUntil(date?: string) {
@@ -475,7 +503,11 @@ const InventoryManagement = () => {
         </p>
       </div>
 
-      <Tabs defaultValue="inventory" className="space-y-4">
+      <Tabs
+        value={activeTab}
+        onValueChange={(value) => setActiveTab(value as InventoryTab)}
+        className="space-y-4"
+      >
         <TabsList>
           <TabsTrigger value="inventory">재고 목록</TabsTrigger>
           <TabsTrigger value="orders">발주 요청</TabsTrigger>
