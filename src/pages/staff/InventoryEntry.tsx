@@ -17,9 +17,21 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Search, Package, AlertTriangle } from 'lucide-react'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from '@/components/ui/dialog'
+import { Label } from '@/components/ui/label'
+import { Search, Package, AlertTriangle, QrCode, Plus } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
+import QrScanner from '@/components/QrScanner'
 import api from '@/lib/api'
+import axios from 'axios'
 
 type Product = {
   _id: string
@@ -40,6 +52,40 @@ const isExpired = (date?: string) => {
   const todayStart = new Date()
   todayStart.setHours(0, 0, 0, 0)
   return target < todayStart
+}
+
+// [자동 계산] 상품 종류별 유통기한 자동 계산 로직
+const getAutoExpiryDate = (productName: string, category: string) => {
+  const today = new Date()
+  let addDays = 180 // 기본값 (라면/일반식품 등)
+
+  const name = productName.toLowerCase()
+  const cat = category || '기타'
+
+  if (cat === '식품') {
+    if (
+      name.includes('삼각') ||
+      name.includes('김밥') ||
+      name.includes('도시락') ||
+      name.includes('샌드위치') ||
+      name.includes('버거')
+    ) {
+      addDays = 3 // 신선식품
+    } else if (name.includes('우유') || name.includes('유제품')) {
+      addDays = 10 // 유제품
+    } else if (name.includes('빵') || name.includes('케이크')) {
+      addDays = 7 // 베이커리
+    } else if (name.includes('라면') || name.includes('면')) {
+      addDays = 180 // 라면류
+    }
+  } else if (cat === '음료') {
+    addDays = 180 // 음료
+  } else if (cat === '생활용품') {
+    addDays = 365 * 2 // 생활용품 (2년)
+  }
+
+  const targetDate = new Date(today.setDate(today.getDate() + addDays))
+  return targetDate.toISOString().split('T')[0]
 }
 
 // 데모용 모의 데이터
@@ -73,6 +119,17 @@ const InventoryManagement = () => {
   const [items, setItems] = useState<Product[]>([])
   const [loading, setLoading] = useState(false)
 
+  // QR 입력 상태
+  const [qrOpen, setQrOpen] = useState(false)
+  const [scanning, setScanning] = useState(false)
+  const [qrData, setQrData] = useState({
+    barcode: '',
+    productName: '',
+    quantity: 1,
+    price: 0,
+    expireDate: '',
+  })
+
   const fetchInventory = async () => {
     setLoading(true)
 
@@ -97,11 +154,11 @@ const InventoryManagement = () => {
 
       // 데이터 매핑 및 기본값 처리
       const mapped = res.data.map((item: any) => {
+        const expired = isExpired(item.expiryDate)
         return {
           _id: item._id,
           productName: item.name || item.productName || '',
-          // 유통기한이 지나도 실제 재고 수량을 그대로 표시하고, UI에서만 D-Day로 안내
-          quantity: Math.max(0, Number(item.stock) || 0),
+          quantity: expired ? 0 : Number(item.stock) || 0, // 유통기한 지난 상품은 0으로 표시
           category: item.category || '기타',
           price: Number(item.price) || 0,
           minStock: Number(item.minStock) || 5,
@@ -142,6 +199,100 @@ const InventoryManagement = () => {
     fetchInventory()
   }, [])
 
+  const handleScan = (decodedText: string) => {
+    try {
+      const parsed = JSON.parse(decodedText)
+      if (parsed.productId || parsed.productName) {
+        // 유통기한 자동 계산 로직 추가
+        let finalExpireDate = parsed.expireDate
+        if (!finalExpireDate) {
+          // 기존 재고에서 카테고리 찾기
+          const existingItem = items.find(
+            (i) =>
+              i._id === parsed.productId || i.productName === parsed.productName
+          )
+          const category = existingItem?.category || '기타'
+          finalExpireDate = getAutoExpiryDate(
+            parsed.productName || '',
+            category
+          )
+        }
+
+        setQrData((prev) => ({
+          ...prev,
+          barcode: parsed.productId || prev.barcode,
+          productName: parsed.productName || prev.productName,
+          quantity: parsed.quantity || prev.quantity,
+          expireDate: finalExpireDate,
+        }))
+        setScanning(false)
+        toast({
+          title: '스캔 성공',
+          description: 'QR 코드가 인식되었습니다. (유통기한 자동 입력)',
+        })
+      } else {
+        throw new Error('Invalid format')
+      }
+    } catch (e) {
+      setQrData((prev) => ({ ...prev, barcode: decodedText }))
+      setScanning(false)
+      toast({
+        title: '스캔 성공',
+        description: '바코드가 인식되었습니다.',
+      })
+    }
+  }
+
+  const handleQrSubmit = async () => {
+    if (!qrData.productName || !qrData.quantity) {
+      toast({
+        title: '입력 오류',
+        description: '상품명과 수량은 필수입니다.',
+        variant: 'destructive',
+      })
+      return
+    }
+
+    if (!qrData.expireDate) {
+      toast({
+        title: '입력 오류',
+        description: '유통기한을 입력해주세요.',
+        variant: 'destructive',
+      })
+      return
+    }
+
+    try {
+      await api.post('/save-qr', {
+        data: JSON.stringify({
+          ...qrData,
+          entryDate: new Date().toISOString(),
+        }),
+      })
+
+      toast({
+        title: '입고 완료',
+        description: `${qrData.productName} ${qrData.quantity}개가 입고되었습니다.`,
+      })
+      setQrOpen(false)
+      setQrData({
+        barcode: '',
+        productName: '',
+        quantity: 1,
+        price: 0,
+        expireDate: '',
+      })
+      fetchInventory() // 목록 갱신
+    } catch (err) {
+      console.error(err)
+      toast({
+        title: '입고 실패',
+        description: '서버 오류가 발생했습니다.',
+        variant: 'destructive',
+      })
+    }
+  }
+
   // 검색 및 카테고리 필터링
   const filteredInventory = useMemo(() => {
     return items.filter((item) => {
@@ -174,8 +325,113 @@ const InventoryManagement = () => {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-3xl font-bold">재고 관리</h1>
-        <p className="text-muted-foreground mt-1">재고 현황을 확인하세요</p>
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-3xl font-bold">재고 관리</h1>
+            <p className="text-muted-foreground mt-1">재고 현황을 확인하세요</p>
+          </div>
+          <Dialog
+            open={qrOpen}
+            onOpenChange={(open) => {
+              setQrOpen(open)
+              if (open) setScanning(true)
+            }}
+          >
+            <DialogTrigger asChild>
+              <Button className="gap-2">
+                <QrCode className="w-4 h-4" /> QR 입고 스캔
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="sm:max-w-[500px]">
+              <DialogHeader>
+                <DialogTitle>QR 입고</DialogTitle>
+                <DialogDescription>
+                  {scanning
+                    ? '카메라로 QR 코드를 스캔하세요.'
+                    : '입고 정보를 확인하고 수정하세요.'}
+                </DialogDescription>
+              </DialogHeader>
+
+              {scanning ? (
+                <QrScanner
+                  onScan={handleScan}
+                  onClose={() => setScanning(false)}
+                />
+              ) : (
+                <div className="grid gap-4 py-4">
+                  <div className="grid grid-cols-4 items-center gap-4">
+                    <Label htmlFor="barcode" className="text-right">
+                      바코드
+                    </Label>
+                    <Input
+                      id="barcode"
+                      value={qrData.barcode}
+                      onChange={(e) =>
+                        setQrData({ ...qrData, barcode: e.target.value })
+                      }
+                      className="col-span-3"
+                      placeholder="스캔된 바코드 번호"
+                    />
+                  </div>
+                  <div className="grid grid-cols-4 items-center gap-4">
+                    <Label htmlFor="name" className="text-right">
+                      상품명
+                    </Label>
+                    <Input
+                      id="name"
+                      value={qrData.productName}
+                      onChange={(e) =>
+                        setQrData({ ...qrData, productName: e.target.value })
+                      }
+                      className="col-span-3"
+                      placeholder="예: 신라면"
+                    />
+                  </div>
+                  <div className="grid grid-cols-4 items-center gap-4">
+                    <Label htmlFor="qty" className="text-right">
+                      수량
+                    </Label>
+                    <Input
+                      id="qty"
+                      type="number"
+                      value={qrData.quantity}
+                      onChange={(e) =>
+                        setQrData({
+                          ...qrData,
+                          quantity: Number(e.target.value),
+                        })
+                      }
+                      className="col-span-3"
+                    />
+                  </div>
+                  <div className="grid grid-cols-4 items-center gap-4">
+                    <Label htmlFor="expiry" className="text-right">
+                      유통기한
+                    </Label>
+                    <Input
+                      id="expiry"
+                      type="date"
+                      value={qrData.expireDate}
+                      onChange={(e) =>
+                        setQrData({ ...qrData, expireDate: e.target.value })
+                      }
+                      className="col-span-3"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {!scanning && (
+                <DialogFooter>
+                  <Button variant="outline" onClick={() => setScanning(true)}>
+                    다시 스캔
+                  </Button>
+                  <Button onClick={handleQrSubmit}>입고 처리</Button>
+                </DialogFooter>
+              )}
+            </DialogContent>
+          </Dialog>
+        </div>
       </div>
 
       <Tabs defaultValue="inventory" className="space-y-4">

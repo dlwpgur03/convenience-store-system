@@ -1,6 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import axios from 'axios'
-import { useLocation } from 'react-router-dom'
+import { useEffect, useMemo, useState } from 'react'
 import {
   Card,
   CardContent,
@@ -19,7 +17,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Search, Package, AlertTriangle } from 'lucide-react'
+import { Search, Package, AlertTriangle, QrCode, Scan, Mail, Trash2, Pencil } from 'lucide-react'
+import { QRCodeSVG } from 'qrcode.react'
+import QrScanner from '@/components/QrScanner'
+import { Label } from '@/components/ui/label'
 import {
   Dialog,
   DialogContent,
@@ -30,6 +31,7 @@ import {
 } from '@/components/ui/dialog'
 import { useToast } from '@/hooks/use-toast'
 import api from '@/lib/api'
+import axios from 'axios'
 
 type Product = {
   _id: string
@@ -50,19 +52,10 @@ type OrderRequest = {
   requestedBy: string
   date: string
   status: '대기' | '승인' | '거절'
-  /*************  ✨ Windsurf Command ⭐  *************/
-  /**
-   * Fetches inventory data from the backend API.
-   * If the request is successful, the received data is mapped to include default values for category, minStock, and price.
-   * The mapped data is then set to the items state.
-   * If the request fails, a toast error message is displayed.
-   * Finally, the loading state is set to false.
-   */
-  /*******  34d91ae8-c998-4c15-b3f0-01d65f2cf339  *******/ orderQuantity?: number
+  orderQuantity?: number
   orderedAt?: string
+  expireDate?: string // QR 생성용 자동 계산된 유통기한
 }
-
-type InventoryTab = 'inventory' | 'orders' | 'expiring'
 
 const isExpired = (date?: string) => {
   if (!date) return false
@@ -97,8 +90,6 @@ const mergeOrderRequests = (
 
   existing.forEach((req) => {
     const low = lowMap.get(req.id)
-    // 승인된 항목이 더 이상 재고 부족 목록에 없으면 목록에서 제거
-    if (req.status === '승인' && !low) return
     const keep = req.status !== '대기' || !!low
     if (!keep) return
     if (low) lowMap.delete(req.id)
@@ -115,6 +106,40 @@ const mergeOrderRequests = (
   lowMap.forEach((req) => merged.push(req))
 
   return merged
+}
+
+// [자동 계산] 상품 종류별 유통기한 자동 계산 로직
+const getAutoExpiryDate = (productName: string, category: string) => {
+  const today = new Date()
+  let addDays = 180 // 기본값 (라면/일반식품 등)
+
+  const name = productName.toLowerCase()
+  const cat = category || '기타'
+
+  if (cat === '식품') {
+    if (
+      name.includes('삼각') ||
+      name.includes('김밥') ||
+      name.includes('도시락') ||
+      name.includes('샌드위치') ||
+      name.includes('버거')
+    ) {
+      addDays = 3 // 신선식품
+    } else if (name.includes('우유') || name.includes('유제품')) {
+      addDays = 10 // 유제품
+    } else if (name.includes('빵') || name.includes('케이크')) {
+      addDays = 7 // 베이커리
+    } else if (name.includes('라면') || name.includes('면')) {
+      addDays = 180 // 라면류
+    }
+  } else if (cat === '음료') {
+    addDays = 180 // 음료
+  } else if (cat === '생활용품') {
+    addDays = 365 * 2 // 생활용품 (2년)
+  }
+
+  const targetDate = new Date(today.setDate(today.getDate() + addDays))
+  return targetDate.toISOString().split('T')[0]
 }
 
 const MOCK_PRODUCTS: Product[] = [
@@ -162,7 +187,6 @@ const MOCK_PRODUCTS: Product[] = [
 
 const InventoryManagement = () => {
   const { toast } = useToast()
-  const location = useLocation()
   const [searchTerm, setSearchTerm] = useState('')
   const [selectedCategory, setSelectedCategory] = useState('전체')
   const [sortMode, setSortMode] = useState<'default' | 'lowStock' | 'expiry'>(
@@ -170,40 +194,20 @@ const InventoryManagement = () => {
   )
   const [items, setItems] = useState<Product[]>([])
   const [loading, setLoading] = useState(false)
-  const [isDemoMode, setIsDemoMode] = useState(false)
-  const [orderRequests, setOrderRequests] = useState<OrderRequest[]>(() =>
-    loadSavedOrders()
+  const [orderRequests, setOrderRequests] = useState<OrderRequest[]>(
+    () => loadSavedOrders()
   )
   const [approveTarget, setApproveTarget] = useState<OrderRequest | null>(null)
   const [orderQuantity, setOrderQuantity] = useState('')
-  const pendingSyncTimers = useRef<
-    Record<string, ReturnType<typeof setTimeout>>
-  >({})
-  const [activeTab, setActiveTab] = useState<InventoryTab>(() => {
-    const stateTab = (location.state as any)?.tab
-    const searchTab = new URLSearchParams(location.search).get('tab')
-    const candidate = stateTab || searchTab
-    return candidate === 'orders' ||
-      candidate === 'expiring' ||
-      candidate === 'inventory'
-      ? candidate
-      : 'inventory'
+  const [qrTarget, setQrTarget] = useState<Product | null>(null)
+  
+  // QR 입고 관련 상태
+  const [scanTarget, setScanTarget] = useState<OrderRequest | null>(null)
+  const [scanning, setScanning] = useState(false)
+  const [receiveData, setReceiveData] = useState({
+    quantity: 0,
+    expireDate: '',
   })
-
-  useEffect(() => {
-    const stateTab = (location.state as any)?.tab
-    const searchTab = new URLSearchParams(location.search).get('tab')
-    const candidate = stateTab || searchTab
-    if (
-      candidate === 'orders' ||
-      candidate === 'expiring' ||
-      candidate === 'inventory'
-    ) {
-      setActiveTab((prev) => (prev === candidate ? prev : candidate))
-    } else {
-      setActiveTab('inventory')
-    }
-  }, [location])
 
   // [안전장치 3] 날짜 계산 로직 강화 (함수 선언으로 호이스팅)
   function daysUntil(date?: string) {
@@ -221,7 +225,6 @@ const InventoryManagement = () => {
 
     const token = localStorage.getItem('token')
     if (!token) {
-      setIsDemoMode(true)
       console.warn('No auth token found. Using mock data.')
       setItems(MOCK_PRODUCTS)
       toast({
@@ -241,7 +244,8 @@ const InventoryManagement = () => {
         setItems([])
         return
       }
-      setIsDemoMode(false)
+
+      console.log('Fetched inventory:', res.data)
 
       const mapped = res.data.map((item: any) => {
         const expired = isExpired(item.expiryDate)
@@ -249,9 +253,12 @@ const InventoryManagement = () => {
           _id: item._id,
           // [안전장치 2] 필드값이 없을 경우 기본값 할당 (Null Check)
           productName: item.name || '이름 없음',
-          // 유통기한이 지나도 실제 재고 수량은 유지하고, 화면에서만 D-Day로 표시
           quantity:
-            typeof item.stock === 'number' ? Math.max(0, item.stock) : 0,
+            typeof item.stock === 'number'
+              ? expired
+                ? 0
+                : item.stock
+              : 0, // 유통기한 지난 상품은 0으로 표시
           category: item.category || '기타',
           price: typeof item.price === 'number' ? item.price : 0,
           minStock: typeof item.minStock === 'number' ? item.minStock : 5,
@@ -267,7 +274,7 @@ const InventoryManagement = () => {
       console.warn('API Error (using mock data):', err.message)
 
       let errorMsg = '재고 목록을 불러오지 못했습니다.'
-      if (axios.isAxiosError(err)) {
+      if ((axios as any).isAxiosError(err)) {
         if (err.response?.status === 401) {
           errorMsg = '인증이 만료되었습니다. (테스트용 데이터를 표시합니다)'
         } else if (err.code === 'ERR_NETWORK') {
@@ -282,7 +289,6 @@ const InventoryManagement = () => {
       })
 
       // 에러 발생 시 UI 확인을 위해 모의 데이터로 설정
-      setIsDemoMode(true)
       setItems(MOCK_PRODUCTS)
     } finally {
       setLoading(false)
@@ -404,12 +410,6 @@ const InventoryManagement = () => {
     localStorage.setItem(ORDER_STORAGE_KEY, JSON.stringify(orderRequests))
   }, [orderRequests])
 
-  useEffect(() => {
-    return () => {
-      Object.values(pendingSyncTimers.current).forEach((t) => clearTimeout(t))
-    }
-  }, [])
-
   const pendingOrders = orderRequests.filter((r) => r.status === '대기')
   const approvedOrders = orderRequests.filter((r) => r.status === '승인')
 
@@ -439,24 +439,6 @@ const InventoryManagement = () => {
 
   const handleApproveConfirm = async () => {
     if (!approveTarget) return
-    const target = approveTarget
-    if (isDemoMode) {
-      toast({
-        title: '로그인 필요',
-        description: '실제 재고 반영을 위해 로그인 후 다시 시도하세요.',
-        variant: 'destructive',
-      })
-      return
-    }
-    const token = localStorage.getItem('token')
-    if (!token) {
-      toast({
-        title: '로그인 필요',
-        description: '로그인 후 승인하면 DB에 재고가 반영됩니다.',
-        variant: 'destructive',
-      })
-      return
-    }
     const qty = Number(orderQuantity)
     if (Number.isNaN(qty) || qty <= 0) {
       toast({
@@ -467,15 +449,31 @@ const InventoryManagement = () => {
       return
     }
 
+    // [자동 계산] 카테고리별 유통기한 자동 설정
+    const targetProduct = items.find((i) => i._id === approveTarget.id)
+    const category = targetProduct?.category || '기타'
+    
+    const today = new Date()
+    let addDays = 30 // 기본 30일
+    
+    if (category === '식품') addDays = 7
+    else if (category === '음료') addDays = 180
+    else if (category === '생활용품') addDays = 365
+    
+    const autoExpiryDate = new Date(today.setDate(today.getDate() + addDays))
+      .toISOString()
+      .split('T')[0]
+
     const applyApprovalState = () => {
       setOrderRequests((prev) =>
         prev.map((req) =>
-          req.id === target.id
+          req.id === approveTarget.id
             ? {
                 ...req,
                 status: '승인',
                 orderQuantity: qty,
                 orderedAt: new Date().toISOString(),
+                expireDate: autoExpiryDate, // 자동 계산된 유통기한 저장
               }
             : req
         )
@@ -484,76 +482,245 @@ const InventoryManagement = () => {
       setOrderQuantity('')
       toast({
         title: '발주 승인 완료',
-        description: `${target.item}을(를) ${qty}개 발주했습니다.`,
+        description: `발주서와 QR 코드가 이메일로 전송되었습니다. (유통기한 자동 설정: ${autoExpiryDate})`,
       })
     }
 
-    try {
-      applyApprovalState()
-      toast({
-        title: '전송 대기',
-        description: '10초 후 재고에 반영됩니다.',
-      })
+    // 서버 통신 없이 상태만 변경 (이메일 전송 시뮬레이션)
+    applyApprovalState()
+  }
 
-      // 10초 후 DB 반영하고 승인 목록에서 제거
-      if (pendingSyncTimers.current[approveTarget.id]) {
-        clearTimeout(pendingSyncTimers.current[approveTarget.id])
+  // [자동 계산] 스캔 대상 설정 시 기본 유통기한 자동 입력
+  useEffect(() => {
+    if (scanTarget) {
+      const product = items.find((i) => i._id === scanTarget.id)
+      if (product) {
+        const autoDate = getAutoExpiryDate(
+          product.productName,
+          product.category || '기타'
+        )
+        setReceiveData((prev) => ({
+          ...prev,
+          expireDate: prev.expireDate || autoDate,
+        }))
+      }
+    }
+  }, [scanTarget, items])
+
+  const handleScanReceive = (decodedText: string) => {
+    try {
+      const parsed = JSON.parse(decodedText)
+      // QR 데이터 검증 (여기서는 간단히 ID 확인)
+      if (parsed.productId && scanTarget) {
+        // 스캔 성공
+        setScanning(false)
+
+        // QR에 유통기한이 없으면 자동 계산된 값 사용
+        let finalExpireDate = parsed.expireDate
+        if (!finalExpireDate) {
+          const product = items.find((i) => i._id === parsed.productId)
+          if (product) {
+            finalExpireDate = getAutoExpiryDate(
+              product.productName,
+              product.category || '기타'
+            )
+          }
+        }
+
+        setReceiveData((prev) => ({
+          ...prev,
+          quantity: parsed.quantity || scanTarget.orderQuantity || 0,
+          expireDate: finalExpireDate || '', // QR에서 유통기한 자동 입력
+        }))
+
+        const msg = finalExpireDate
+          ? 'QR 코드 확인 완료. (유통기한 자동 입력됨)'
+          : 'QR 코드 확인 완료. 유통기한을 입력해주세요.'
+
+        toast({
+          title: '스캔 성공',
+          description: msg,
+        })
+      } else {
+        throw new Error('Invalid QR')
+      }
+    } catch (e) {
+      // 에러 처리 또는 단순 바코드 처리
+      setScanning(false)
+      toast({
+        title: '스캔 완료',
+        description: '바코드가 인식되었습니다.',
+      })
+    }
+  }
+
+  const handleReceiveSubmit = async () => {
+    if (!scanTarget) return
+    if (!receiveData.expireDate) {
+      toast({
+        title: '입력 오류',
+        description: '유통기한을 입력해주세요.',
+        variant: 'destructive',
+      })
+      return
+    }
+
+    try {
+      const currentItem = items.find((i) => i._id === scanTarget.id)
+      const newQuantity =
+        (currentItem?.quantity || 0) +
+        (receiveData.quantity || scanTarget.orderQuantity || 0)
+
+      // [Mock Data 처리] ID가 mock_으로 시작하면 서버 요청 없이 로컬 상태만 업데이트
+      if (scanTarget.id.startsWith('mock_')) {
+        console.log('Mock data update simulation')
+        setItems((prev) =>
+          prev.map((item) =>
+            item._id === scanTarget.id
+              ? {
+                  ...item,
+                  quantity: newQuantity,
+                  expireDate: receiveData.expireDate,
+                }
+              : item
+          )
+        )
+      } else {
+        // 1. 재고 추가 API 호출
+        await api.patch(`/products/${scanTarget.id}`, {
+          quantity: newQuantity,
+          expiryDate: receiveData.expireDate,
+        })
       }
 
-      pendingSyncTimers.current[target.id] = setTimeout(async () => {
-        try {
-          const approvalTime = target.orderedAt
-            ? new Date(target.orderedAt).getTime()
-            : Date.now()
-          const baseTime = Number.isFinite(approvalTime)
-            ? approvalTime
-            : Date.now()
-          const newExpiry = new Date(baseTime + 3 * 24 * 60 * 60 * 1000)
-          await api.patch(`/products/${target.id}/stock`, {
-            quantity: qty,
-            expiryDate: newExpiry.toISOString(),
-          })
-          setItems((prev) =>
-            prev.map((item) =>
-              item._id === target.id
-                ? { ...item, quantity: item.quantity + qty }
-                : item
-            )
-          )
-          // 승인 목록에서 제거
-          setOrderRequests((prev) => prev.filter((req) => req.id !== target.id))
-          toast({
-            title: '재고 반영 완료',
-            description: `${target.item} 재고가 업데이트되었습니다.`,
-          })
-          await fetchInventory()
-        } catch (err: any) {
-          console.error('발주 승인 처리 실패:', err)
-          const msg =
-            err?.response?.data?.message ||
-            (err?.message?.includes('Network')
-              ? '서버 연결에 문제가 있습니다.'
-              : '')
-          toast({
-            title: '승인 실패',
-            description:
-              msg || '재고 업데이트에 실패했습니다. 다시 시도해주세요.',
-            variant: 'destructive',
-          })
-        } finally {
-          delete pendingSyncTimers.current[target.id]
-        }
-      }, 10000)
-    } catch (err: any) {
-      console.error('발주 승인 처리 실패:', err)
-      const msg =
-        err?.response?.data?.message ||
-        (err?.message?.includes('Network')
-          ? '서버 연결에 문제가 있습니다.'
-          : '')
+      // 2. 발주 목록에서 제거 (또는 완료 처리)
+      setOrderRequests((prev) => prev.filter((r) => r.id !== scanTarget.id))
+
       toast({
-        title: '승인 실패',
-        description: msg || '재고 업데이트에 실패했습니다. 다시 시도해주세요.',
+        title: '입고 완료',
+        description: `${scanTarget.item} ${receiveData.quantity}개가 입고되었습니다.`,
+      })
+
+      // 목록 새로고침 (Mock 데이터가 아닐 경우에만)
+      if (!scanTarget.id.startsWith('mock_')) {
+        fetchInventory()
+      }
+      
+      setScanTarget(null)
+      setReceiveData({ quantity: 0, expireDate: '' })
+    } catch (e: any) {
+      console.error(e)
+      let errorMsg = '서버 오류가 발생했습니다.'
+      
+      if ((axios as any).isAxiosError(e)) {
+        if (e.response?.status === 404) {
+          errorMsg = 'API 경로를 찾을 수 없습니다. 서버를 재시작해주세요.'
+        } else if (e.response?.data?.message) {
+          errorMsg = e.response.data.message
+        }
+      }
+
+      toast({
+        title: '입고 실패',
+        description: errorMsg,
+        variant: 'destructive',
+      })
+    }
+  }
+
+  const handleDeleteProduct = async (id: string) => {
+    if (!confirm('정말 이 상품을 삭제하시겠습니까?')) return
+
+    // [Mock Data 처리]
+    if (id.startsWith('mock_')) {
+      setItems((prev) => prev.filter((item) => item._id !== id))
+      toast({
+        title: '삭제 완료',
+        description: '테스트 상품이 삭제되었습니다.',
+      })
+      return
+    }
+
+    try {
+      await api.delete(`/products/${id}`)
+      toast({
+        title: '삭제 완료',
+        description: '상품이 삭제되었습니다.',
+      })
+      fetchInventory()
+    } catch (e: any) {
+      console.error(e)
+      let errorMsg = '상품 삭제 중 오류가 발생했습니다.'
+
+      if ((axios as any).isAxiosError(e)) {
+        if (e.response?.status === 404) {
+          errorMsg = '이미 삭제되었거나 존재하지 않는 상품입니다.'
+          // 이미 삭제된 경우 목록에서도 제거
+          setItems((prev) => prev.filter((item) => item._id !== id))
+        } else if (e.response?.status === 400) {
+          errorMsg = '잘못된 요청입니다. (ID 오류)'
+        } else if (e.response?.data?.message) {
+          errorMsg = e.response.data.message
+        }
+      }
+
+      toast({
+        title: '삭제 실패',
+        description: errorMsg,
+        variant: 'destructive',
+      })
+    }
+  }
+
+  const [editPriceTarget, setEditPriceTarget] = useState<Product | null>(null)
+  const [editPriceValue, setEditPriceValue] = useState('')
+
+  const handleEditPrice = async () => {
+    if (!editPriceTarget) return
+    const newPrice = Number(editPriceValue)
+    if (isNaN(newPrice) || newPrice < 0) {
+      toast({
+        title: '입력 오류',
+        description: '유효한 가격을 입력해주세요.',
+        variant: 'destructive',
+      })
+      return
+    }
+
+    try {
+      // [Mock Data 처리]
+      if (editPriceTarget._id.startsWith('mock_')) {
+        setItems((prev) =>
+          prev.map((item) =>
+            item._id === editPriceTarget._id
+              ? { ...item, price: newPrice }
+              : item
+          )
+        )
+      } else {
+        await api.patch(`/products/${editPriceTarget._id}`, {
+          price: newPrice,
+        })
+        // 화면 즉시 갱신 (새로고침 없이)
+        setItems((prev) =>
+          prev.map((item) =>
+            item._id === editPriceTarget._id
+              ? { ...item, price: newPrice }
+              : item
+          )
+        )
+      }
+
+      toast({
+        title: '수정 완료',
+        description: '가격이 수정되었습니다.',
+      })
+      setEditPriceTarget(null)
+    } catch (e) {
+      console.error(e)
+      toast({
+        title: '수정 실패',
+        description: '가격 수정 중 오류가 발생했습니다.',
         variant: 'destructive',
       })
     }
@@ -569,19 +736,7 @@ const InventoryManagement = () => {
         </p>
       </div>
 
-      {isDemoMode && (
-        <Card className="border-warning/40 bg-warning/10">
-          <CardContent className="py-3 text-sm text-warning">
-            현재 데모 모드입니다. 로그인 후 승인해야 DB 재고가 업데이트됩니다.
-          </CardContent>
-        </Card>
-      )}
-
-      <Tabs
-        value={activeTab}
-        onValueChange={(value) => setActiveTab(value as InventoryTab)}
-        className="space-y-4"
-      >
+      <Tabs defaultValue="inventory" className="space-y-4">
         <TabsList>
           <TabsTrigger value="inventory">재고 목록</TabsTrigger>
           <TabsTrigger value="orders">발주 요청</TabsTrigger>
@@ -685,11 +840,11 @@ const InventoryManagement = () => {
             </CardHeader>
             <CardContent>
               <div className="space-y-3">
-                {filteredInventory.map((item) => {
+                {filteredInventory.map((item, index) => {
                   const expiry = daysUntil(item.expireDate)
                   return (
                     <div
-                      key={item._id}
+                      key={item._id || index}
                       className="flex items-center justify-between p-4 border rounded-lg hover:bg-muted/50 transition-colors"
                     >
                       <div className="flex items-center gap-4 flex-1">
@@ -698,13 +853,49 @@ const InventoryManagement = () => {
                         </div>
                         <div className="flex-1">
                           <h4 className="font-medium">{item.productName}</h4>
-                          <p className="text-sm text-muted-foreground">
-                            {item.category} • ₩
-                            {item.price?.toLocaleString?.() ?? '-'}
-                          </p>
+                          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                            <span>{item.category}</span>
+                            <span>•</span>
+                            <div className="flex items-center gap-1">
+                              <span className="font-medium">
+                                ₩{item.price?.toLocaleString?.() ?? '-'}
+                              </span>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-6 w-6 text-muted-foreground hover:text-primary"
+                                onClick={() => {
+                                  setEditPriceTarget(item)
+                                  setEditPriceValue(
+                                    item.price?.toString() || '0'
+                                  )
+                                }}
+                                title="가격 수정"
+                              >
+                                <Pencil className="w-3 h-3" />
+                              </Button>
+                            </div>
+                          </div>
                         </div>
                       </div>
                       <div className="flex items-center gap-6">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => setQrTarget(item)}
+                          title="QR 코드 보기"
+                        >
+                          <QrCode className="w-4 h-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                          onClick={() => handleDeleteProduct(item._id)}
+                          title="상품 삭제"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </Button>
                         <div className="text-right">
                           <p className="text-sm text-muted-foreground">재고</p>
                           <p
@@ -723,9 +914,7 @@ const InventoryManagement = () => {
                           </p>
                           <p
                             className={`font-medium ${
-                              expiry !== null &&
-                              expiry <= 3 &&
-                              item.quantity > 0
+                              expiry !== null && expiry <= 3 && item.quantity > 0
                                 ? 'text-destructive'
                                 : ''
                             }`}
@@ -733,8 +922,8 @@ const InventoryManagement = () => {
                             {item.quantity <= 0
                               ? '-'
                               : expiry === null
-                              ? '-'
-                              : `D-${expiry}`}
+                                ? '-'
+                                : `D-${expiry}`}
                           </p>
                         </div>
                         {item.quantity < (item.minStock ?? 0) && (
@@ -745,16 +934,14 @@ const InventoryManagement = () => {
                             부족
                           </Badge>
                         )}
-                        {item.quantity > 0 &&
-                          expiry !== null &&
-                          expiry <= 3 && (
-                            <Badge
-                              variant="outline"
-                              className="border-destructive text-destructive"
-                            >
-                              임박
-                            </Badge>
-                          )}
+                        {item.quantity > 0 && expiry !== null && expiry <= 3 && (
+                          <Badge
+                            variant="outline"
+                            className="border-destructive text-destructive"
+                          >
+                            임박
+                          </Badge>
+                        )}
                       </div>
                     </div>
                   )
@@ -780,9 +967,9 @@ const InventoryManagement = () => {
             </CardHeader>
             <CardContent>
               <div className="space-y-3">
-                {pendingOrders.map((request) => (
+                {pendingOrders.map((request, index) => (
                   <div
-                    key={request.id}
+                    key={request.id || index}
                     className="flex items-center justify-between p-4 border rounded-lg"
                   >
                     <div>
@@ -823,9 +1010,9 @@ const InventoryManagement = () => {
             </CardHeader>
             <CardContent>
               <div className="space-y-3">
-                {approvedOrders.map((request) => (
+                {approvedOrders.map((request, index) => (
                   <div
-                    key={request.id}
+                    key={request.id || index}
                     className="flex items-center justify-between p-4 border rounded-lg"
                   >
                     <div>
@@ -837,12 +1024,42 @@ const InventoryManagement = () => {
                           : '-'}
                       </p>
                     </div>
-                    <Badge
-                      variant="outline"
-                      className="border-success text-success"
-                    >
-                      승인됨
-                    </Badge>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() =>
+                          setQrTarget({
+                            _id: request.id,
+                            productName: request.item,
+                            // @ts-ignore
+                            orderQuantity: request.orderQuantity,
+                            expireDate: request.expireDate,
+                          } as unknown as Product)
+                        }
+                        title="발주 QR 보기 (이메일 첨부)"
+                      >
+                        <Mail className="w-4 h-4" />
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="gap-2"
+                        onClick={() => {
+                          setScanTarget(request)
+                          setScanning(true)
+                        }}
+                      >
+                        <Scan className="w-4 h-4" />
+                        입고 스캔
+                      </Button>
+                      <Badge
+                        variant="outline"
+                        className="border-success text-success"
+                      >
+                        승인됨
+                      </Badge>
+                    </div>
                   </div>
                 ))}
                 {approvedOrders.length === 0 && (
@@ -866,9 +1083,9 @@ const InventoryManagement = () => {
             </CardHeader>
             <CardContent>
               <div className="space-y-3">
-                {expiringItems.map((item) => (
+                {expiringItems.map((item, index) => (
                   <div
-                    key={item._id}
+                    key={item._id || index}
                     className="flex items-center justify-between p-4 border border-destructive/20 bg-destructive/5 rounded-lg"
                   >
                     <div className="flex items-center gap-4">
@@ -898,6 +1115,41 @@ const InventoryManagement = () => {
         </TabsContent>
       </Tabs>
 
+      {/* 가격 수정 다이얼로그 */}
+      <Dialog
+        open={!!editPriceTarget}
+        onOpenChange={(open) => !open && setEditPriceTarget(null)}
+      >
+        <DialogContent className="sm:max-w-[400px]">
+          <DialogHeader>
+            <DialogTitle>가격 수정</DialogTitle>
+            <DialogDescription>
+              {editPriceTarget?.productName}의 판매 가격을 수정합니다.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label htmlFor="edit-price" className="text-right">
+                가격
+              </Label>
+              <Input
+                id="edit-price"
+                type="number"
+                value={editPriceValue}
+                onChange={(e) => setEditPriceValue(e.target.value)}
+                className="col-span-3"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditPriceTarget(null)}>
+              취소
+            </Button>
+            <Button onClick={handleEditPrice}>수정 완료</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <Dialog
         open={!!approveTarget}
         onOpenChange={(open) => {
@@ -909,25 +1161,134 @@ const InventoryManagement = () => {
       >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>발주 수량 입력</DialogTitle>
+            <DialogTitle>발주 승인</DialogTitle>
             <DialogDescription>
-              {approveTarget?.item}에 대해 주문할 수량을 입력하세요.
+              {approveTarget?.item}의 발주 수량을 입력하세요.
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-2">
-            <Input
-              type="number"
-              min={1}
-              value={orderQuantity}
-              onChange={(e) => setOrderQuantity(e.target.value)}
-            />
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label>주문 수량</Label>
+              <Input
+                type="number"
+                min={1}
+                value={orderQuantity}
+                onChange={(e) => setOrderQuantity(e.target.value)}
+              />
+              <p className="text-xs text-muted-foreground">
+                * 유통기한은 상품 카테고리에 따라 자동 설정되어 QR에 포함됩니다.
+              </p>
+            </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setApproveTarget(null)}>
               취소
             </Button>
-            <Button onClick={handleApproveConfirm}>전송</Button>
+            <Button onClick={handleApproveConfirm}>승인 및 QR 생성</Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!qrTarget} onOpenChange={(open) => !open && setQrTarget(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>QR 코드 - {qrTarget?.productName}</DialogTitle>
+            <DialogDescription>
+              이 QR 코드를 스캔하여 재고를 입고할 수 있습니다.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex items-center justify-center p-6">
+            {qrTarget && (
+              <div className="bg-white p-4 rounded-lg">
+                <QRCodeSVG
+                  value={JSON.stringify({
+                    productId: qrTarget._id,
+                    productName: qrTarget.productName,
+                    quantity: (qrTarget as any).orderQuantity,
+                    expireDate: (qrTarget as any).expireDate, // 유통기한 포함
+                  })}
+                  size={200}
+                />
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button onClick={() => setQrTarget(null)}>닫기</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* 입고 스캔 다이얼로그 */}
+      <Dialog
+        open={!!scanTarget}
+        onOpenChange={(open) => {
+          if (!open) {
+            setScanTarget(null)
+            setScanning(false)
+            setReceiveData({ quantity: 0, expireDate: '' })
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle>입고 처리 - {scanTarget?.item}</DialogTitle>
+            <DialogDescription>
+              {scanning
+                ? '도착한 물품의 QR 코드를 스캔하세요.'
+                : '입고 정보를 확인하고 유통기한을 입력하세요.'}
+            </DialogDescription>
+          </DialogHeader>
+
+          {scanning ? (
+            <QrScanner
+              onScan={handleScanReceive}
+              onClose={() => setScanning(false)}
+            />
+          ) : (
+            <div className="grid gap-4 py-4">
+              <div className="grid grid-cols-4 items-center gap-4">
+                <Label className="text-right">상품명</Label>
+                <div className="col-span-3 font-medium">{scanTarget?.item}</div>
+              </div>
+              <div className="grid grid-cols-4 items-center gap-4">
+                <Label className="text-right">입고 수량</Label>
+                <Input
+                  type="number"
+                  value={receiveData.quantity}
+                  onChange={(e) =>
+                    setReceiveData({
+                      ...receiveData,
+                      quantity: Number(e.target.value),
+                    })
+                  }
+                  className="col-span-3"
+                />
+              </div>
+              <div className="grid grid-cols-4 items-center gap-4">
+                <Label className="text-right">유통기한</Label>
+                <Input
+                  type="date"
+                  value={receiveData.expireDate}
+                  onChange={(e) =>
+                    setReceiveData({
+                      ...receiveData,
+                      expireDate: e.target.value,
+                    })
+                  }
+                  className="col-span-3"
+                />
+              </div>
+            </div>
+          )}
+
+          {!scanning && (
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setScanning(true)}>
+                다시 스캔
+              </Button>
+              <Button onClick={handleReceiveSubmit}>입고 완료</Button>
+            </DialogFooter>
+          )}
         </DialogContent>
       </Dialog>
     </div>
