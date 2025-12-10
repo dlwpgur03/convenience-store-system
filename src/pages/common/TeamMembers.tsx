@@ -28,7 +28,7 @@ const TeamMembers = () => {
         name: '이제혁',
         role: '팀장',
         github: 'https://github.com/dlwpgur03',
-        portfolio: 'https://2-personal-project.vercel.app',
+        portfolio: 'https://dnpqtjqjqhdksvmfhrmfoaldrodlsrhkwp.vercel.app',
       },
       {
         name: '김민우',
@@ -46,14 +46,13 @@ const TeamMembers = () => {
         name: '박용담',
         role: '팀원',
         github: 'https://github.com/ydam113',
-        portfolio: 'https://nextjs-portfolio-flax-delta.vercel.app',
+        portfolio: 'https://nextjs-portfolio-flax-delta.vercel.app/',
       },
       {
         name: '양유상',
         role: '팀원',
         github: 'https://github.com/yangyu0330',
-        portfolio:
-          'https://portfolio-git-main-yangyus-projects-dce9b625.vercel.app/',
+        portfolio: 'https://portfolio-ai-alpha-eight.vercel.app/',
       },
     ]
 
