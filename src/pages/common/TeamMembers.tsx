@@ -28,7 +28,7 @@ const TeamMembers = () => {
         name: '이제혁',
         role: '팀장',
         github: 'https://github.com/dlwpgur03',
-        portfolio: 'https://2-personal-project.vercel.app',
+        portfolio: 'https://dnpqtjqjqhdksvmfhrmfoaldrodlsrhkwp.vercel.app',
       },
       {
         name: '김민우',
