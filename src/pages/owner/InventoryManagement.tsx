@@ -374,7 +374,7 @@ const InventoryManagement = () => {
   // 자동 발주 목록 생성 로직
   useEffect(() => {
     const next = items
-      .filter((item) => item.quantity <= 2)
+      .filter((item) => item.quantity <= 5)
       .map((item) => {
         // [안전장치 4] 날짜 변환 시 에러 방지
         let dateStr = '-'
@@ -962,7 +962,7 @@ const InventoryManagement = () => {
             <CardHeader>
               <CardTitle>발주 요청 목록</CardTitle>
               <CardDescription>
-                수량 2개 이하 품목을 자동 감지해 보여줍니다.
+                수량 5개 이하 품목을 자동 감지해 보여줍니다.
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -996,7 +996,7 @@ const InventoryManagement = () => {
                 ))}
                 {pendingOrders.length === 0 && (
                   <div className="text-center text-muted-foreground py-6">
-                    2개 이하 재고가 없습니다.
+                    5개 이하 재고가 없습니다.
                   </div>
                 )}
               </div>
