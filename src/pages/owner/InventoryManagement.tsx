@@ -368,7 +368,7 @@ const InventoryManagement = () => {
   const expiringItems = filteredInventory.filter((item) => {
     const d = daysUntil(item.expireDate)
     // 재고가 0인 품목은 임박 목록/표시에서 제외
-    return item.quantity > 0 && d !== null && d <= 7
+    return item.quantity > 0 && d !== null && d <= 3
   })
 
   // 자동 발주 목록 생성 로직
@@ -824,7 +824,7 @@ const InventoryManagement = () => {
                   {expiringItems.length}개
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  7일 이내 유통기한
+                  3일 이내 유통기한
                 </p>
               </CardContent>
             </Card>
@@ -1078,7 +1078,7 @@ const InventoryManagement = () => {
             <CardHeader>
               <CardTitle>유통기한 임박 상품</CardTitle>
               <CardDescription>
-                7일 이내 유통기한이 도래하는 상품
+                3일 이내 유통기한이 도래하는 상품
               </CardDescription>
             </CardHeader>
             <CardContent>
